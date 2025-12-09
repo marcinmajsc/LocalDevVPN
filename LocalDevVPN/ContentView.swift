@@ -47,6 +47,13 @@ class TunnelManager: ObservableObject {
     @Published var vpnManager: NETunnelProviderManager?
     private var vpnObserver: NSObjectProtocol?
     private var isProcessingStatusChange = false
+    private let isSimulator: Bool = {
+        #if targetEnvironment(simulator)
+            return true
+        #else
+            return false
+        #endif
+    }()
 
     private var tunnelDeviceIp: String {
         UserDefaults.standard.string(forKey: "TunnelDeviceIP") ?? "10.7.0.0"
@@ -108,8 +115,16 @@ class TunnelManager: ObservableObject {
     }
 
     private init() {
-        setupStatusObserver()
+        if isSimulator {
         loadTunnelPreferences()
+            VPNLogger.shared.log("Running on Simulator – VPN calls are mocked")
+            DispatchQueue.main.async { [weak self] in
+                self?.waitingOnSettings = true
+            }
+        } else {
+            setupStatusObserver()
+            loadTunnelPreferences()
+        }
     }
 
     // MARK: - Private Methods
@@ -321,6 +336,11 @@ class TunnelManager: ObservableObject {
     }
 
     func startVPN() {
+        if isSimulator {
+            simulateStartVPN()
+            return
+        }
+
         if let manager = vpnManager {
             let currentStatus = manager.connection.status
             VPNLogger.shared.log("Current manager status: \(currentStatus.rawValue)")
@@ -499,6 +519,11 @@ class TunnelManager: ObservableObject {
     }
 
     func stopVPN() {
+        if isSimulator {
+            simulateStopVPN()
+            return
+        }
+
         guard let manager = vpnManager else {
             VPNLogger.shared.log("No VPN manager available to stop")
             return
@@ -575,6 +600,11 @@ class TunnelManager: ObservableObject {
     // MARK: - Cleanup Utilities
 
     func cleanupAllVPNConfigurations() {
+        if isSimulator {
+            VPNLogger.shared.log("Simulator cleanup skipped – no real VPN configurations to remove")
+            return
+        }
+
         NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
             guard let self = self else { return }
 
@@ -615,6 +645,30 @@ class TunnelManager: ObservableObject {
     deinit {
         if let observer = vpnObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func simulateStartVPN() {
+        VPNLogger.shared.log("Simulator: pretend to start VPN")
+        DispatchQueue.main.async { [weak self] in
+            self?.tunnelStatus = .connecting
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.tunnelStatus = .connected
+            VPNLogger.shared.log("Simulator: VPN marked connected")
+        }
+    }
+
+    private func simulateStopVPN() {
+        VPNLogger.shared.log("Simulator: pretend to stop VPN")
+        DispatchQueue.main.async { [weak self] in
+            self?.tunnelStatus = .disconnecting
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.tunnelStatus = .disconnected
+            VPNLogger.shared.log("Simulator: VPN marked disconnected")
         }
     }
 }
